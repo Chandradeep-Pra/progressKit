@@ -1,30 +1,21 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import {
-  Background,
-  Controls,
-  Handle,
-  MarkerType,
-  MiniMap,
-  Position,
-  ReactFlow,
-  applyNodeChanges,
-  type Edge,
-  type Node,
-  type NodeChange,
-  type NodeProps,
-} from "@xyflow/react";
+import type { CSSProperties, PointerEvent, WheelEvent } from "react";
 import {
   ArrowRight,
   Bot,
-  Boxes,
   Database,
   GitBranch,
   Loader2,
+  Maximize2,
   MessageSquare,
+  Minus,
+  Moon,
   Plus,
+  RefreshCw,
   Sparkles,
+  Sun,
   TableProperties,
 } from "lucide-react";
 
@@ -39,10 +30,31 @@ import { Button } from "./ui/button";
 type DataCatalogViewProps = {
   catalog: DataCatalog;
   contexts: SelectedCollectionContext[];
+  initialTab?: CanvasTab;
+  isRefreshing?: boolean;
   onProceed: () => void;
+  onRefresh: () => void;
+  onToggleTheme: () => void;
+  theme: "dark" | "light";
 };
 
-type CanvasTab = "map" | "relationships" | "entities" | "ingredients";
+type CanvasTab = "relationships" | "entities" | "ingredients";
+type CanvasDrag =
+  | {
+      collection: string;
+      startClientX: number;
+      startClientY: number;
+      startX: number;
+      startY: number;
+      type: "card";
+    }
+  | {
+      startClientX: number;
+      startClientY: number;
+      startX: number;
+      startY: number;
+      type: "pan";
+    };
 type DbChat = {
   answer: string;
   command: {
@@ -55,37 +67,108 @@ type DbChat = {
   evidence: string[];
   provider: "fallback" | "gemini";
 };
-type DbNodeData = {
-  activeTab: CanvasTab;
-  chat?: DbChat;
-  entity: EntityProfile;
-  isAsking: boolean;
-  isOpen: boolean;
-  message: string;
-  relationship?: RelationshipCandidate;
-  onAsk: (collection: string) => void;
-  onMessage: (collection: string, value: string) => void;
-  onSelect: (collection: string) => void;
-};
 
 const tabs: Array<{ icon: typeof Database; id: CanvasTab; label: string }> = [
-  { icon: Boxes, id: "map", label: "Map" },
-  { icon: GitBranch, id: "relationships", label: "Relations" },
+  { icon: GitBranch, id: "relationships", label: "Connections" },
   { icon: Database, id: "entities", label: "Collections" },
   { icon: TableProperties, id: "ingredients", label: "Fields" },
 ];
 
 const nodePositions = [
-  { x: 640, y: 90 },
-  { x: 930, y: 260 },
-  { x: 790, y: 590 },
-  { x: 430, y: 610 },
-  { x: 250, y: 280 },
-  { x: 1120, y: 610 },
-  { x: 220, y: 690 },
-  { x: 420, y: 120 },
-  { x: 1110, y: 100 },
-  { x: 630, y: 360 },
+  { x: 230, y: 150 },
+  { x: 590, y: 150 },
+  { x: 590, y: 430 },
+  { x: 230, y: 430 },
+  { x: 950, y: 150 },
+  { x: 950, y: 430 },
+  { x: 230, y: 710 },
+  { x: 590, y: 710 },
+  { x: 950, y: 710 },
+  { x: 1310, y: 430 },
+];
+
+function generatedPosition(index: number) {
+  const preset = nodePositions[index];
+  if (preset) return preset;
+
+  return {
+    x: 230 + (index % 4) * 360,
+    y: 150 + Math.floor(index / 4) * 280,
+  };
+}
+
+const exampleEntities: EntityProfile[] = [
+  {
+    collection: "users",
+    entityRole: "identity",
+    fields: [
+      { cardinality: 4, examples: ["user_1"], kind: "string", name: "id", nullRate: 0, roles: ["id"] },
+      { cardinality: 4, examples: ["Pro"], kind: "string", name: "plan", nullRate: 0, roles: ["dimension"] },
+      { cardinality: 4, examples: ["2026-05-16"], kind: "timestamp", name: "createdAt", nullRate: 0, roles: ["timestamp"] },
+    ],
+    rowCount: 4,
+    score: 92,
+  },
+  {
+    collection: "orders",
+    entityRole: "transaction",
+    fields: [
+      { cardinality: 4, examples: ["order_1"], kind: "string", name: "id", nullRate: 0, roles: ["id"] },
+      { cardinality: 3, examples: ["user_1"], kind: "string", name: "userId", nullRate: 0, roles: ["reference"] },
+      { cardinality: 4, examples: ["4900"], kind: "number", name: "amount", nullRate: 0, roles: ["measure"] },
+    ],
+    rowCount: 4,
+    score: 88,
+  },
+  {
+    collection: "payments",
+    entityRole: "transaction",
+    fields: [
+      { cardinality: 4, examples: ["pay_1"], kind: "string", name: "id", nullRate: 0, roles: ["id"] },
+      { cardinality: 4, examples: ["order_1"], kind: "string", name: "orderId", nullRate: 0, roles: ["reference"] },
+      { cardinality: 2, examples: ["paid"], kind: "string", name: "status", nullRate: 0, roles: ["dimension"] },
+    ],
+    rowCount: 4,
+    score: 84,
+  },
+  {
+    collection: "events",
+    entityRole: "event",
+    fields: [
+      { cardinality: 4, examples: ["evt_1"], kind: "string", name: "id", nullRate: 0, roles: ["id"] },
+      { cardinality: 3, examples: ["user_1"], kind: "string", name: "userId", nullRate: 0, roles: ["reference"] },
+      { cardinality: 4, examples: ["login"], kind: "string", name: "type", nullRate: 0, roles: ["dimension"] },
+    ],
+    rowCount: 4,
+    score: 80,
+  },
+];
+
+const exampleRelationships: RelationshipCandidate[] = [
+  {
+    confidence: 0.86,
+    fromCollection: "orders",
+    fromField: "userId",
+    reason: "example user reference",
+    toCollection: "users",
+    toField: "id",
+  },
+  {
+    confidence: 0.82,
+    fromCollection: "payments",
+    fromField: "orderId",
+    reason: "example order reference",
+    toCollection: "orders",
+    toField: "id",
+  },
+  {
+    confidence: 0.78,
+    fromCollection: "events",
+    fromField: "userId",
+    reason: "example user activity reference",
+    toCollection: "users",
+    toField: "id",
+  },
 ];
 
 function collectionLabel(path: string) {
@@ -96,6 +179,21 @@ function scoreTone(score: number) {
   if (score >= 75) return "bg-emerald-50 text-emerald-700 ring-emerald-100";
   if (score >= 45) return "bg-amber-50 text-amber-700 ring-amber-100";
   return "bg-neutral-100 text-neutral-600 ring-neutral-200";
+}
+
+function relationshipKey(relationship: RelationshipCandidate) {
+  return `${relationship.fromCollection}-${relationship.fromField}-${relationship.toCollection}-${relationship.toField}`;
+}
+
+function fallbackRelationships(entities: EntityProfile[]) {
+  return entities.slice(1).map((entity) => ({
+    confidence: 0.2,
+    fromCollection: entities[0]?.collection || entity.collection,
+    fromField: "sampled schema",
+    reason: "Shown as a canvas grouping until stronger joins are detected.",
+    toCollection: entity.collection,
+    toField: "collection",
+  }));
 }
 
 function metricSeeds(catalog: DataCatalog) {
@@ -119,21 +217,6 @@ function metricSeeds(catalog: DataCatalog) {
     : [{ detail: "Use sampled rows", title: "Collection health" }];
 }
 
-function relationshipKey(relationship: RelationshipCandidate) {
-  return `${relationship.fromCollection}-${relationship.fromField}-${relationship.toCollection}-${relationship.toField}`;
-}
-
-function fallbackRelationships(entities: EntityProfile[]) {
-  return entities.slice(1).map((entity) => ({
-    confidence: 0.2,
-    fromCollection: entities[0]?.collection || entity.collection,
-    fromField: "sampled schema",
-    reason: "Shown as a canvas grouping until stronger joins are detected.",
-    toCollection: entity.collection,
-    toField: "collection",
-  }));
-}
-
 function relationshipForNode(
   entity: EntityProfile,
   relationships: RelationshipCandidate[],
@@ -145,30 +228,53 @@ function relationshipForNode(
   );
 }
 
-function DbCollectionNode({ data }: NodeProps<Node<DbNodeData, "dbCollection">>) {
-  const entity = data.entity;
+function CollectionCanvasCard({
+  activeTab,
+  chat,
+  entity,
+  isAsking,
+  isDragging,
+  isOpen,
+  message,
+  onAsk,
+  onMessage,
+  onSelect,
+  relationship,
+}: {
+  activeTab: CanvasTab;
+  chat?: DbChat;
+  entity: EntityProfile;
+  isAsking: boolean;
+  isDragging: boolean;
+  isOpen: boolean;
+  message: string;
+  onAsk: (collection: string) => void;
+  onMessage: (collection: string, value: string) => void;
+  onSelect: (collection: string) => void;
+  relationship?: RelationshipCandidate;
+}) {
   const measures = entity.fields.filter((field) => field.roles.includes("measure"));
   const timestamps = entity.fields.filter((field) => field.roles.includes("timestamp"));
   const dimensions = entity.fields.filter((field) => field.roles.includes("dimension"));
   const visibleFields =
-    data.activeTab === "ingredients"
+    activeTab === "ingredients"
       ? [...measures, ...timestamps, ...dimensions].slice(0, 8)
-      : data.activeTab === "relationships"
+      : activeTab === "relationships"
         ? entity.fields.filter((field) => field.roles.includes("reference")).slice(0, 8)
         : entity.fields.slice(0, 6);
 
   return (
     <div
-      className={`w-[304px] rounded-2xl border bg-white/95 p-4 text-left shadow-[0_18px_45px_rgba(15,15,15,0.1)] backdrop-blur transition ${
-        data.isOpen ? "border-black ring-4 ring-black/5" : "border-neutral-200"
-      }`}
+      className={`w-[304px] rounded-2xl border bg-white/95 p-4 text-left shadow-[0_18px_45px_rgba(15,15,15,0.1)] backdrop-blur transition hover:border-[var(--accent-blue)] ${
+        isOpen ? "border-black ring-4 ring-black/5" : "border-neutral-200"
+      } ${isDragging ? "cursor-grabbing" : "cursor-grab"}`}
     >
-      <Handle id="target" position={Position.Left} type="target" />
-      <Handle id="source" position={Position.Right} type="source" />
-
       <button
         className="w-full text-left"
-        onClick={() => data.onSelect(entity.collection)}
+        onClick={(event) => {
+          event.stopPropagation();
+          onSelect(entity.collection);
+        }}
         type="button"
       >
         <div className="flex items-start justify-between gap-3">
@@ -193,24 +299,29 @@ function DbCollectionNode({ data }: NodeProps<Node<DbNodeData, "dbCollection">>)
         </div>
       </button>
 
-      {data.relationship && (
+      {relationship && (
         <div className="mt-3 rounded-2xl border border-dashed border-neutral-200 bg-[#fbfaf7] px-3 py-2 text-xs text-neutral-500">
-          {collectionLabel(data.relationship.fromCollection)}.
-          {data.relationship.fromField}
+          {collectionLabel(relationship.fromCollection)}.{relationship.fromField}
           <span className="px-1 text-black">{"->"}</span>
-          {collectionLabel(data.relationship.toCollection)}
+          {collectionLabel(relationship.toCollection)}
         </div>
       )}
 
-      <div className="mt-3 flex flex-wrap gap-2">
-        {visibleFields.slice(0, data.isOpen ? 8 : 4).map((field) => (
-          <span
-            className="max-w-full truncate rounded-full bg-neutral-100 px-2.5 py-1 text-xs text-neutral-600"
-            key={field.name}
-          >
-            {field.name}
+      <div className="mt-3 flex min-h-7 flex-wrap gap-2">
+        {visibleFields.length > 0 ? (
+          visibleFields.slice(0, isOpen ? 8 : 4).map((field) => (
+            <span
+              className="max-w-full truncate rounded-full bg-neutral-100 px-2.5 py-1 text-xs text-neutral-600"
+              key={field.name}
+            >
+              {field.name}
+            </span>
+          ))
+        ) : (
+          <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-xs text-neutral-500">
+            Sample pending
           </span>
-        ))}
+        )}
       </div>
 
       <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs text-neutral-500">
@@ -228,8 +339,11 @@ function DbCollectionNode({ data }: NodeProps<Node<DbNodeData, "dbCollection">>)
         </div>
       </div>
 
-      {data.isOpen && (
-        <div className="nodrag nowheel mt-4 rounded-2xl border border-neutral-200 bg-[#fbfaf7] p-3">
+      {isOpen && (
+        <div
+          className="mt-4 cursor-default rounded-2xl border border-neutral-200 bg-[#fbfaf7] p-3"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
           <div className="mb-3 flex items-start gap-2">
             <span className="grid size-7 shrink-0 place-items-center rounded-full bg-black text-white">
               <Bot className="size-3.5" />
@@ -245,32 +359,32 @@ function DbCollectionNode({ data }: NodeProps<Node<DbNodeData, "dbCollection">>)
             </div>
           </div>
 
-          {data.chat && (
+          {chat && (
             <div className="mb-3 rounded-2xl border border-neutral-200 bg-white p-3 text-xs text-neutral-600">
-              <p className="text-sm font-medium text-black">{data.chat.answer}</p>
+              <p className="text-sm font-medium text-black">{chat.answer}</p>
               <p className="mt-2 font-medium text-neutral-500">Read plan</p>
               <p className="mt-1 truncate">
-                {data.chat.command.intent} · {data.chat.command.collections.join(", ")}
+                {chat.command.intent} - {chat.command.collections.join(", ")}
               </p>
-              {data.chat.evidence[0] && (
-                <p className="mt-2 text-neutral-500">{data.chat.evidence[0]}</p>
+              {chat.evidence[0] && (
+                <p className="mt-2 text-neutral-500">{chat.evidence[0]}</p>
               )}
             </div>
           )}
 
           <textarea
             className="h-20 w-full resize-none rounded-2xl border border-neutral-200 bg-white p-3 text-sm text-black outline-none placeholder:text-neutral-400 focus:border-neutral-400"
-            onChange={(event) => data.onMessage(entity.collection, event.target.value)}
+            onChange={(event) => onMessage(entity.collection, event.target.value)}
             placeholder={`Ask about ${collectionLabel(entity.collection)}...`}
-            value={data.message}
+            value={message}
           />
           <div className="mt-2 flex justify-end">
             <Button
               className="h-9 px-4"
-              disabled={!data.message.trim() || data.isAsking}
-              onClick={() => data.onAsk(entity.collection)}
+              disabled={!message.trim() || isAsking}
+              onClick={() => onAsk(entity.collection)}
             >
-              {data.isAsking && <Loader2 className="size-3.5 animate-spin" />}
+              {isAsking && <Loader2 className="size-3.5 animate-spin" />}
               Ask AI
             </Button>
           </div>
@@ -280,21 +394,23 @@ function DbCollectionNode({ data }: NodeProps<Node<DbNodeData, "dbCollection">>)
   );
 }
 
-const nodeTypes = {
-  dbCollection: DbCollectionNode,
-};
-
 export function DataCatalogView({
   catalog,
   contexts,
+  initialTab = "relationships",
+  isRefreshing = false,
   onProceed,
+  onRefresh,
+  onToggleTheme,
+  theme,
 }: DataCatalogViewProps) {
-  const [activeTab, setActiveTab] = useState<CanvasTab>("map");
+  const [activeTab, setActiveTab] = useState<CanvasTab>(initialTab);
   const [customMetric, setCustomMetric] = useState("");
+  const [drag, setDrag] = useState<CanvasDrag>();
   const [ideas, setIdeas] = useState<string[]>([]);
-  const [showMetrics, setShowMetrics] = useState(true);
+  const [showMetrics, setShowMetrics] = useState(false);
   const [selectedCollection, setSelectedCollection] = useState(
-    catalog.entities[0]?.collection || "",
+    catalog.entities[0]?.collection || exampleEntities[0].collection,
   );
   const [messages, setMessages] = useState<Record<string, string>>({});
   const [chats, setChats] = useState<Record<string, DbChat>>({});
@@ -302,6 +418,8 @@ export function DataCatalogView({
   const [nodePositionMap, setNodePositionMap] = useState<
     Record<string, { x: number; y: number }>
   >({});
+  const [canvasPointer, setCanvasPointer] = useState({ x: "50%", y: "50%" });
+  const [viewport, setViewport] = useState({ x: 330, y: 190, zoom: 0.85 });
 
   const updateNodeMessage = useCallback((collection: string, value: string) => {
     setMessages((current) => ({ ...current, [collection]: value }));
@@ -349,99 +467,26 @@ export function DataCatalogView({
     [catalog, contexts, messages],
   );
 
-  const relationships = useMemo(
+  const displayEntities =
+    catalog.entities.length > 0 ? catalog.entities : exampleEntities;
+  const displayRelationships =
+    catalog.entities.length > 0 ? catalog.relationships : exampleRelationships;
+  const relationships =
+    displayRelationships.length > 0
+      ? displayRelationships
+      : fallbackRelationships(displayEntities);
+  const positions = useMemo(
     () =>
-      catalog.relationships.length > 0
-        ? catalog.relationships
-        : fallbackRelationships(catalog.entities),
-    [catalog.entities, catalog.relationships],
+      Object.fromEntries(
+        displayEntities.map((entity, index) => [
+          entity.collection,
+          nodePositionMap[entity.collection] ||
+            generatedPosition(index),
+        ]),
+      ) as Record<string, { x: number; y: number }>,
+    [displayEntities, nodePositionMap],
   );
   const seeds = useMemo(() => metricSeeds(catalog), [catalog]);
-  const baseNodes = useMemo<Node<DbNodeData, "dbCollection">[]>(
-    () =>
-      catalog.entities.map((entity, index) => ({
-        data: {
-          activeTab,
-          chat: chats[entity.collection],
-          entity,
-          isAsking: askingCollection === entity.collection,
-          isOpen: selectedCollection === entity.collection,
-          message: messages[entity.collection] || "",
-          onAsk: askDbAi,
-          onMessage: updateNodeMessage,
-          onSelect: setSelectedCollection,
-          relationship: relationshipForNode(entity, relationships),
-        },
-        id: entity.collection,
-        position:
-          nodePositionMap[entity.collection] ||
-          nodePositions[index % nodePositions.length] ||
-          { x: 600, y: 360 },
-        type: "dbCollection",
-      })),
-    [
-      activeTab,
-      askingCollection,
-      askDbAi,
-      catalog.entities,
-      chats,
-      messages,
-      nodePositionMap,
-      relationships,
-      selectedCollection,
-      updateNodeMessage,
-    ],
-  );
-
-  const edges = useMemo<Edge[]>(
-    () =>
-      relationships.map((relationship) => ({
-        animated:
-          selectedCollection === relationship.fromCollection ||
-          selectedCollection === relationship.toCollection,
-        data: relationship,
-        id: relationshipKey(relationship),
-        label: relationship.fromField,
-        markerEnd: {
-          color: "#171717",
-          type: MarkerType.ArrowClosed,
-        },
-        source: relationship.fromCollection,
-        sourceHandle: "source",
-        style: {
-          stroke:
-            selectedCollection === relationship.fromCollection ||
-            selectedCollection === relationship.toCollection
-              ? "#171717"
-              : "#a3a3a3",
-          strokeDasharray: catalog.relationships.length > 0 ? undefined : "6 6",
-          strokeWidth:
-            selectedCollection === relationship.fromCollection ||
-            selectedCollection === relationship.toCollection
-              ? 2.4
-              : 1.4,
-        },
-        target: relationship.toCollection,
-        targetHandle: "target",
-        type: "smoothstep",
-      })),
-    [catalog.relationships.length, relationships, selectedCollection],
-  );
-
-  const onNodesChange = useCallback(
-    (changes: NodeChange<Node<DbNodeData, "dbCollection">>[]) => {
-      setNodePositionMap((current) => {
-        const changedNodes = applyNodeChanges(changes, baseNodes);
-        return {
-          ...current,
-          ...Object.fromEntries(
-            changedNodes.map((node) => [node.id, node.position]),
-          ),
-        };
-      });
-    },
-    [baseNodes],
-  );
 
   const addIdea = () => {
     const next = customMetric.trim();
@@ -450,16 +495,100 @@ export function DataCatalogView({
     setCustomMetric("");
   };
 
+  const moveCanvas = (event: PointerEvent<HTMLElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    setCanvasPointer({
+      x: `${event.clientX - bounds.left}px`,
+      y: `${event.clientY - bounds.top}px`,
+    });
+
+    if (!drag) return;
+
+    if (drag.type === "card") {
+      setNodePositionMap((current) => ({
+        ...current,
+        [drag.collection]: {
+          x: drag.startX + (event.clientX - drag.startClientX) / viewport.zoom,
+          y: drag.startY + (event.clientY - drag.startClientY) / viewport.zoom,
+        },
+      }));
+      return;
+    }
+
+    setViewport((current) => ({
+      ...current,
+      x: drag.startX + event.clientX - drag.startClientX,
+      y: drag.startY + event.clientY - drag.startClientY,
+    }));
+  };
+
+  const zoomCanvas = (nextZoom: number) => {
+    setViewport((current) => ({
+      ...current,
+      zoom: Math.max(0.35, Math.min(1.8, nextZoom)),
+    }));
+  };
+
+  const handleWheel = (event: WheelEvent<HTMLElement>) => {
+    event.preventDefault();
+    const nextZoom = Math.max(
+      0.35,
+      Math.min(1.8, viewport.zoom * (event.deltaY > 0 ? 0.92 : 1.08)),
+    );
+    const worldX = (event.clientX - viewport.x) / viewport.zoom;
+    const worldY = (event.clientY - viewport.y) / viewport.zoom;
+
+    setViewport({
+      x: event.clientX - worldX * nextZoom,
+      y: event.clientY - worldY * nextZoom,
+      zoom: nextZoom,
+    });
+  };
+
   return (
-    <section className="fixed inset-0 z-40 overflow-hidden bg-[#f7f4ee] text-black">
+    <section
+      className="relation-canvas-shell fixed inset-0 z-40 overflow-hidden text-black"
+      onPointerCancel={() => setDrag(undefined)}
+      onPointerMove={moveCanvas}
+      onPointerUp={() => setDrag(undefined)}
+      onWheel={handleWheel}
+      style={
+        {
+          "--canvas-pointer-x": canvasPointer.x,
+          "--canvas-pointer-y": canvasPointer.y,
+        } as CSSProperties
+      }
+    >
       <aside className="absolute left-4 top-4 z-30 flex max-h-[calc(100vh-32px)] w-[276px] flex-col rounded-2xl border border-neutral-200 bg-white/88 p-4 shadow-[0_24px_70px_rgba(15,15,15,0.12)] backdrop-blur xl:left-6 xl:top-6">
         <div className="mb-5">
           <div className="flex items-center gap-2 text-xs font-medium uppercase text-neutral-500">
-            <Sparkles className="size-3.5" />
+            {/* <Sparkles className="size-3.5" /> */}
             Analyze connection
           </div>
           <h2 className="mt-2 text-2xl font-semibold text-black">Data canvas</h2>
         </div>
+
+        <button
+          className="mb-4 flex w-full items-center justify-between rounded-full border border-neutral-200 bg-white px-3 py-2 text-sm font-medium text-black transition hover:border-neutral-300"
+          onClick={onToggleTheme}
+          type="button"
+        >
+          <span className="flex items-center gap-2">
+            {theme === "dark" ? (
+              <Moon className="size-4" />
+            ) : (
+              <Sun className="size-4" />
+            )}
+            {theme === "dark" ? "Dark" : "Light"}
+          </span>
+          <span
+            className={`flex h-5 w-9 items-center rounded-full p-0.5 transition ${
+              theme === "dark" ? "justify-end bg-black" : "justify-start bg-neutral-200"
+            }`}
+          >
+            <span className="size-4 rounded-full bg-white shadow-sm" />
+          </span>
+        </button>
 
         <div className="space-y-1">
           {tabs.map((tab) => {
@@ -492,7 +621,7 @@ export function DataCatalogView({
           onClick={() => setShowMetrics((current) => !current)}
           type="button"
         >
-          Possible metrics
+          Metric ideas
           <span className="text-xs text-neutral-500">
             {showMetrics ? "Hide" : "Show"}
           </span>
@@ -535,49 +664,212 @@ export function DataCatalogView({
         </div>
 
         <Button className="mt-4 w-full" onClick={onProceed}>
-          Generate metrics
+          Open metric builder
         </Button>
       </aside>
 
       <div className="absolute left-[312px] right-4 top-4 z-20 flex items-center justify-between rounded-2xl border border-neutral-200 bg-white/80 px-5 py-3 shadow-sm backdrop-blur xl:left-[330px] xl:right-6 xl:top-6">
         <div>
           <p className="text-xs font-medium uppercase text-neutral-500">
-            {catalog.entities.length} collections - {catalog.relationships.length} detected links
+            {displayEntities.length} collections - {relationships.length} detected links
           </p>
           <h3 className="mt-1 text-xl font-semibold text-black">
-            {activeTab === "map" && "Database relationship map"}
-            {activeTab === "relationships" && "Detected joins and paths"}
+            {activeTab === "relationships" && "Database connections"}
             {activeTab === "entities" && "Collection intelligence"}
             {activeTab === "ingredients" && "Metric-ready fields"}
           </h3>
         </div>
-        <div className="rounded-full border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-500">
-          Drag cards. Click one to chat inside it.
+        <div className="flex items-center gap-2">
+          <div className="rounded-full border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-500">
+            {displayEntities.length} collection cards on canvas
+          </div>
+          <button
+            className="inline-flex h-10 items-center gap-2 rounded-full border border-neutral-200 bg-white px-4 text-sm font-medium text-black transition hover:border-[var(--accent-blue)] hover:text-[var(--accent-blue)] disabled:opacity-60"
+            disabled={isRefreshing}
+            onClick={onRefresh}
+            type="button"
+          >
+            <RefreshCw className={`size-4 ${isRefreshing ? "animate-spin" : ""}`} />
+            {isRefreshing ? "Refreshing" : "Refresh"}
+          </button>
         </div>
       </div>
 
-      <ReactFlow
-        className="bg-[linear-gradient(rgba(0,0,0,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.045)_1px,transparent_1px)] bg-[size:34px_34px]"
-        edges={edges}
-        fitView
-        fitViewOptions={{ padding: 0.22 }}
-        minZoom={0.35}
-        nodes={baseNodes}
-        nodeTypes={nodeTypes}
-        onNodesChange={onNodesChange}
-        panOnScroll
-        proOptions={{ hideAttribution: true }}
+      <div
+        className={`relation-canvas-stage absolute inset-0 z-10 ${drag?.type === "pan" ? "cursor-grabbing" : "cursor-grab"}`}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          setDrag({
+            startClientX: event.clientX,
+            startClientY: event.clientY,
+            startX: viewport.x,
+            startY: viewport.y,
+            type: "pan",
+          });
+        }}
       >
-        <Background color="#d4d4d4" gap={34} size={1} />
-        <Controls className="!bottom-6 !left-[318px] !rounded-2xl !border !border-neutral-200 !bg-white/90 !shadow-lg" />
-        <MiniMap
-          className="!bottom-6 !right-6 !rounded-2xl !border !border-neutral-200 !bg-white/90 !shadow-lg"
-          maskColor="rgba(247,244,238,0.62)"
-          nodeColor="#111111"
-          pannable
-          zoomable
-        />
-      </ReactFlow>
+        <div
+          className="absolute left-0 top-0 h-[1000px] w-[1300px]"
+          style={{
+            transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`,
+            transformOrigin: "0 0",
+          }}
+        >
+          <svg className="absolute inset-0 z-0 overflow-visible" height="1200" width="1600">
+            <defs>
+              <marker
+                id="relation-arrow"
+                markerHeight="7"
+                markerWidth="7"
+                orient="auto"
+                refX="6"
+                refY="3.5"
+              >
+                <polygon fill="var(--accent-blue)" points="0 0, 7 3.5, 0 7" />
+              </marker>
+            </defs>
+            {relationships.map((relationship) => {
+              const from = positions[relationship.fromCollection];
+              const to = positions[relationship.toCollection];
+              if (!from || !to) return null;
+              const selected =
+                selectedCollection === relationship.fromCollection ||
+                selectedCollection === relationship.toCollection;
+
+              return (
+                <g key={relationshipKey(relationship)}>
+                  <line
+                    markerEnd="url(#relation-arrow)"
+                    stroke={selected ? "var(--accent-blue)" : "var(--border-hover)"}
+                    strokeDasharray={catalog.relationships.length > 0 ? undefined : "7 7"}
+                    strokeLinecap="round"
+                    strokeWidth={selected ? 2.5 : 1.5}
+                    x1={from.x}
+                    x2={to.x}
+                    y1={from.y}
+                    y2={to.y}
+                  />
+                  <text
+                    fill="var(--text-muted)"
+                    fontSize="13"
+                    textAnchor="middle"
+                    x={(from.x + to.x) / 2}
+                    y={(from.y + to.y) / 2 - 12}
+                  >
+                    {relationship.fromField}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+
+          <div className="absolute inset-0 z-10">
+          {displayEntities.map((entity) => {
+            const position = positions[entity.collection];
+            return (
+              <div
+                className="absolute will-change-transform"
+                key={entity.collection}
+                onPointerDown={(event) => {
+                  if (event.button !== 0) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setSelectedCollection(entity.collection);
+                  setDrag({
+                    collection: entity.collection,
+                    startClientX: event.clientX,
+                    startClientY: event.clientY,
+                    startX: position.x,
+                    startY: position.y,
+                    type: "card",
+                  });
+                }}
+                style={{
+                  left: position.x,
+                  top: position.y,
+                  transform: "translate(-50%, -50%)",
+                }}
+              >
+                <CollectionCanvasCard
+                  activeTab={activeTab}
+                  chat={chats[entity.collection]}
+                  entity={entity}
+                  isAsking={askingCollection === entity.collection}
+                  isDragging={
+                    drag?.type === "card" && drag.collection === entity.collection
+                  }
+                  isOpen={selectedCollection === entity.collection}
+                  message={messages[entity.collection] || ""}
+                  onAsk={askDbAi}
+                  onMessage={updateNodeMessage}
+                  onSelect={setSelectedCollection}
+                  relationship={relationshipForNode(entity, relationships)}
+                />
+              </div>
+            );
+          })}
+          </div>
+        </div>
+      </div>
+
+      <div className="canvas-controls absolute bottom-6 left-[318px] z-30 flex">
+        <button
+          className="react-flow__controls-button"
+          onClick={() => zoomCanvas(viewport.zoom + 0.12)}
+          type="button"
+        >
+          <Plus className="size-4" />
+        </button>
+        <button
+          className="react-flow__controls-button"
+          onClick={() => zoomCanvas(viewport.zoom - 0.12)}
+          type="button"
+        >
+          <Minus className="size-4" />
+        </button>
+        <button
+          className="react-flow__controls-button"
+          onClick={() => setViewport({ x: 330, y: 190, zoom: 0.85 })}
+          type="button"
+        >
+          <Maximize2 className="size-4" />
+        </button>
+      </div>
+
+      <div className="canvas-minimap absolute bottom-6 right-6 z-30 h-[150px] w-[220px]">
+        <div className="relative size-full">
+          {relationships.map((relationship) => {
+            const from = positions[relationship.fromCollection];
+            const to = positions[relationship.toCollection];
+            if (!from || !to) return null;
+            return (
+              <svg className="absolute inset-0 size-full" key={relationshipKey(relationship)}>
+                <line
+                  stroke="var(--border-hover)"
+                  strokeWidth="1"
+                  x1={`${(from.x / 1300) * 100}%`}
+                  x2={`${(to.x / 1300) * 100}%`}
+                  y1={`${(from.y / 1000) * 100}%`}
+                  y2={`${(to.y / 1000) * 100}%`}
+                />
+              </svg>
+            );
+          })}
+          {displayEntities.map((entity) => {
+            const position = positions[entity.collection];
+            return (
+              <span
+                className="absolute size-2 rounded-full bg-[var(--accent-blue)]"
+                key={entity.collection}
+                style={{
+                  left: `${(position.x / 1300) * 100}%`,
+                  top: `${(position.y / 1000) * 100}%`,
+                }}
+              />
+            );
+          })}
+        </div>
+      </div>
     </section>
   );
 }

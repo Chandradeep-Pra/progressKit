@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { Database, Flame, ShieldCheck } from "lucide-react";
+import { Check, Database, Flame, FolderKanban, ShieldCheck } from "lucide-react";
 
 import type { FirestoreDatabase, GoogleProject } from "../lib/firestore-rest";
 import { AccessFixLinks } from "./AccessFixLinks";
@@ -22,6 +22,7 @@ type ConnectFirebaseCardProps = {
   ) => void;
   onDiscoverCollections: (projectId: string, databaseId: string) => void;
   onLoadDatabases: (projectId: string) => void;
+  onSelectProject: (projectId: string, databaseId: string) => void;
   onStartOAuth: () => void;
   projects: GoogleProject[];
 };
@@ -42,6 +43,7 @@ export function ConnectFirebaseCard({
   onContinue,
   onDiscoverCollections,
   onLoadDatabases,
+  onSelectProject,
   onStartOAuth,
   projects,
 }: ConnectFirebaseCardProps) {
@@ -54,6 +56,16 @@ export function ConnectFirebaseCard({
   const selectedDatabase = databases.find(
     (database) => database.id === selectedDatabaseId,
   );
+  const selectedProject = projects.find(
+    (project) => project.projectId === selectedProjectId,
+  );
+
+  const chooseProject = (nextProjectId: string) => {
+    setProjectId(nextProjectId);
+    setDatabaseId("(default)");
+    setCollectionPath("");
+    onSelectProject(nextProjectId, "(default)");
+  };
 
   const submitConnection = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -70,8 +82,79 @@ export function ConnectFirebaseCard({
 
   return (
     <section className="mx-auto w-full max-w-7xl px-5 py-8 sm:px-8">
+      <div
+        className={`mx-auto grid gap-5 ${
+          connected ? "lg:grid-cols-[280px_minmax(0,1fr)]" : "max-w-xl"
+        }`}
+      >
+        {connected && (
+          <aside className="lg:sticky lg:top-6 lg:self-start">
+            <div className="rounded-2xl border border-neutral-200 bg-white/85 p-4 shadow-[0_18px_48px_rgba(20,20,20,0.08)] backdrop-blur">
+              <div className="mb-4 flex items-center gap-2">
+                <span className="grid size-9 place-items-center rounded-2xl bg-black text-white">
+                  <FolderKanban className="size-4" />
+                </span>
+                <div>
+                  <p className="text-sm font-semibold text-black">Projects</p>
+                  <p className="text-xs text-neutral-500">
+                    {projects.length} fetched
+                  </p>
+                </div>
+              </div>
+
+              <div className="max-h-[calc(100vh-220px)] space-y-2 overflow-auto pr-1">
+                {projects.length === 0 && (
+                  <p className="rounded-2xl border border-neutral-200 bg-[#fbfaf7] p-3 text-sm text-neutral-500">
+                    No readable projects found.
+                  </p>
+                )}
+                {projects.map((project) => {
+                  const isSelected = project.projectId === selectedProjectId;
+                  return (
+                    <button
+                      className={`w-full rounded-2xl border p-3 text-left transition hover:-translate-y-0.5 hover:shadow-sm ${
+                        isSelected
+                          ? "border-black bg-black text-white"
+                          : "border-neutral-200 bg-[#fbfaf7] text-black hover:border-neutral-300 hover:bg-white"
+                      }`}
+                      key={project.name}
+                      onClick={() => chooseProject(project.projectId)}
+                      type="button"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold">
+                            {project.displayName || project.projectId}
+                          </p>
+                          <p
+                            className={`mt-1 truncate text-xs ${
+                              isSelected ? "text-white/65" : "text-neutral-500"
+                            }`}
+                          >
+                            {project.projectId}
+                          </p>
+                        </div>
+                        {isSelected && <Check className="mt-0.5 size-4 shrink-0" />}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <Button
+                className="mt-4 w-full"
+                disabled={!selectedProjectId || isLoadingDatabases}
+                onClick={loadDatabases}
+                variant="secondary"
+              >
+                {isLoadingDatabases ? "Finding" : "Find databases"}
+              </Button>
+            </div>
+          </aside>
+        )}
+
       <form
-        className="mx-auto max-w-xl rounded-2xl border border-neutral-200 bg-white/80 p-6 text-center shadow-[0_18px_48px_rgba(20,20,20,0.08)]"
+        className="mx-auto w-full max-w-xl rounded-2xl border border-neutral-200 bg-white/80 p-6 text-center shadow-[0_18px_48px_rgba(20,20,20,0.08)]"
         onSubmit={submitConnection}
       >
         <div className="mx-auto flex size-14 items-center justify-center rounded-2xl border border-neutral-200 bg-[#fff8e7]">
@@ -88,25 +171,19 @@ export function ConnectFirebaseCard({
           </Button>
         ) : (
           <div className="mt-6 grid gap-3 text-left">
-            <label className="text-xs font-medium text-neutral-500">
-              Google Cloud project
-            </label>
-            <select
-              className={inputClass}
-              onChange={(event) => {
-                setProjectId(event.target.value);
-                setDatabaseId("(default)");
-                setCollectionPath("");
-              }}
-              required
-              value={selectedProjectId}
-            >
-              {projects.map((project) => (
-                <option key={project.name} value={project.projectId}>
-                  {project.displayName || project.projectId}
-                </option>
-              ))}
-            </select>
+            <div className="rounded-2xl border border-neutral-200 bg-[#fbfaf7] p-3">
+              <p className="text-xs font-medium text-neutral-500">
+                Selected project
+              </p>
+              <p className="mt-1 truncate text-sm font-semibold text-black">
+                {selectedProject?.displayName || selectedProjectId || "Choose a project"}
+              </p>
+              {selectedProjectId && (
+                <p className="mt-1 truncate text-xs text-neutral-500">
+                  {selectedProjectId}
+                </p>
+              )}
+            </div>
             <div className="flex items-center justify-between gap-3">
               <label className="text-xs font-medium text-neutral-500">
                 Firestore database
@@ -256,6 +333,7 @@ export function ConnectFirebaseCard({
           Read-only access
         </p>
       </form>
+      </div>
     </section>
   );
 }

@@ -1,5 +1,12 @@
 import { FormEvent, useState } from "react";
-import { BarChart3, Bot, MessageSquare, Plus, SlidersHorizontal } from "lucide-react";
+import {
+  ArrowLeft,
+  BarChart3,
+  Bot,
+  MessageSquare,
+  Plus,
+  SlidersHorizontal,
+} from "lucide-react";
 
 import type { MetricPlan } from "../lib/metric-plans";
 import { Button } from "./ui/button";
@@ -7,6 +14,7 @@ import { Button } from "./ui/button";
 type MetricCanvasProps = {
   isLoading: boolean;
   onAddCustom: (prompt: string) => void;
+  onBack: () => void;
   onSelectPlan: (plan: MetricPlan) => void;
   plans: MetricPlan[];
   provider: "fallback" | "gemini";
@@ -22,6 +30,7 @@ function confidenceLabel(confidence: number) {
 export function MetricCanvas({
   isLoading,
   onAddCustom,
+  onBack,
   onSelectPlan,
   plans,
   provider,
@@ -40,6 +49,11 @@ export function MetricCanvas({
     <section className="h-[calc(100vh-96px)] min-h-[760px] px-5 py-6 sm:px-8">
       <div className="grid h-full overflow-hidden rounded-2xl border border-neutral-200 bg-white/75 shadow-[0_22px_64px_rgba(20,20,20,0.08)] xl:grid-cols-[320px_1fr_340px]">
         <aside className="overflow-auto border-b border-neutral-200 bg-[#fbfaf7] p-4 xl:border-b-0 xl:border-r">
+          <Button className="mb-4 h-9 px-3" onClick={onBack} variant="ghost">
+            <ArrowLeft className="size-4" />
+            Back
+          </Button>
+
           <div className="mb-4">
             <p className="text-xs font-medium uppercase text-neutral-500">Metric plans</p>
             <h2 className="mt-2 text-2xl font-semibold text-black">Canvas</h2>
